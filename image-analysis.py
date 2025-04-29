@@ -82,84 +82,127 @@ class Task():
 class ScanTask(Task):
     def __init__(self, args):
         super().__init__(args)
+        # 添加一个任务选项
+        self.task1_only = args.task1_only
+        self.image_folder = args.image_folder
+        self.label_folder = args.label_folder
+        self.task2_label_folder = args.task2_label_folder
 
     def getFileList(self):
-        return glob('./ISIC/train/ISIC_*.jpg')
+        return glob(os.path.join(self.image_folder, 'ISIC_*.jpg'))
 
     def processFile(self, filename):
         rowdata = []
 
-        img = cv2.imread(filename)
-        imgno = re.match('.*ISIC_(\\d*)\\.jpg', filename).group(1)
-        label = cv2.imread('./ISIC/labels/ISIC_{}_segmentation.png'.format(imgno))
+        try:
+            img = cv2.imread(filename)
+            if img is None:
+                print(f"警告: 无法读取图像 {filename}")
+                return []
+                
+            imgno = re.match('.*ISIC_(\\d*)\\.jpg', filename).group(1)
+            label_path = os.path.join(self.label_folder, 'ISIC_{}_segmentation.png'.format(imgno))
+            
+            if not os.path.exists(label_path):
+                print(f"警告: 找不到标签文件 {label_path}")
+                return []
+                
+            label = cv2.imread(label_path)
+            if label is None:
+                print(f"警告: 无法读取标签 {label_path}")
+                return []
 
-        rowdata.append(imgno)
-        rowdata.extend(img.shape)
+            rowdata.append(imgno)
+            rowdata.extend(img.shape)
 
-        if self.args.resize is not None:
-            resized_img = cv2.resize(img, dsize=(self.args.resize, self.args.resize), interpolation=cv2.INTER_CUBIC)
-            cv2.imwrite(os.path.join(self.args.out, '{}.png'.format(imgno)), resized_img)
-            resized_label = cv2.resize(label, dsize=(self.args.resize, self.args.resize), interpolation=cv2.INTER_CUBIC)
-            cv2.imwrite(os.path.join(self.args.out, '{}_mask.png'.format(imgno)), resized_label)
+            if self.args.resize is not None:
+                resized_img = cv2.resize(img, dsize=(self.args.resize, self.args.resize), interpolation=cv2.INTER_CUBIC)
+                cv2.imwrite(os.path.join(self.args.out, '{}.png'.format(imgno)), resized_img)
+                resized_label = cv2.resize(label, dsize=(self.args.resize, self.args.resize), interpolation=cv2.INTER_CUBIC)
+                cv2.imwrite(os.path.join(self.args.out, '{}_mask.png'.format(imgno)), resized_label)
 
-        # calculate ROI
-        top = 0
-        left = 0
-        bottom = label.shape[0]
-        right = label.shape[1]
+            # 计算ROI
+            top = 0
+            left = 0
+            bottom = label.shape[0]
+            right = label.shape[1]
 
-        label_binary = label[:,:,0] == 255
-        mrows = np.argwhere(np.any(label_binary, axis=1))
-        mcols = np.argwhere(np.any(label_binary, axis=0))
-        if len(mrows) > 0 and len(mcols) > 0:
-            top = np.min(mrows)
-            left = np.min(mcols)
-            bottom = np.max(mrows)
-            right = np.max(mcols)
+            label_binary = label[:,:,0] == 255
+            mrows = np.argwhere(np.any(label_binary, axis=1))
+            mcols = np.argwhere(np.any(label_binary, axis=0))
+            if len(mrows) > 0 and len(mcols) > 0:
+                top = np.min(mrows)
+                left = np.min(mcols)
+                bottom = np.max(mrows)
+                right = np.max(mcols)
 
-        rowdata.extend([left, top, right, bottom])
+            rowdata.extend([left, top, right, bottom])
 
-        if self.args.resize is not None:
-            # write out cropped,scaled image
-            roi_img = img[top:bottom, left:right]
-            resized_img = cv2.resize(roi_img, dsize=(self.args.resize, self.args.resize), interpolation=cv2.INTER_CUBIC)
-            cv2.imwrite(os.path.join(self.args.out, 'roi_{}.png'.format(imgno)), resized_img)
+            # 如果不是仅处理任务1，并且需要处理任务2的数据
+            if self.args.resize is not None and not self.task1_only:
+                # 写入裁剪、缩放的图像
+                roi_img = img[top:bottom, left:right]
+                resized_img = cv2.resize(roi_img, dsize=(self.args.resize, self.args.resize), interpolation=cv2.INTER_CUBIC)
+                cv2.imwrite(os.path.join(self.args.out, 'roi_{}.png'.format(imgno)), resized_img)
 
-            # attribute masks corresponding to image
-            attr_mask_files = [
-                './ISIC/task2-labels/ISIC_{}_attribute_globules.png'.format(imgno),
-                './ISIC/task2-labels/ISIC_{}_attribute_milia_like_cyst.png'.format(imgno),
-                './ISIC/task2-labels/ISIC_{}_attribute_negative_network.png'.format(imgno),
-                './ISIC/task2-labels/ISIC_{}_attribute_pigment_network.png'.format(imgno),
-                './ISIC/task2-labels/ISIC_{}_attribute_streaks.png'.format(imgno)
-            ]
+                # 图像对应的属性掩码
+                attr_mask_files = [
+                    os.path.join(self.task2_label_folder, 'ISIC_{}_attribute_globules.png'.format(imgno)),
+                    os.path.join(self.task2_label_folder, 'ISIC_{}_attribute_milia_like_cyst.png'.format(imgno)),
+                    os.path.join(self.task2_label_folder, 'ISIC_{}_attribute_negative_network.png'.format(imgno)),
+                    os.path.join(self.task2_label_folder, 'ISIC_{}_attribute_pigment_network.png'.format(imgno)),
+                    os.path.join(self.task2_label_folder, 'ISIC_{}_attribute_streaks.png'.format(imgno))
+                ]
 
-            for j, attr_mask_file in enumerate(attr_mask_files):
-                # write out cropped, scaled images
-                attr_mask = cv2.imread(attr_mask_file)
-                roi_mask = attr_mask[top:bottom, left:right]
-                resized_mask = cv2.resize(roi_mask, dsize=(self.args.resize, self.args.resize), interpolation=cv2.INTER_CUBIC)
-                cv2.imwrite(os.path.join(self.args.out, 'roi_{}_mask_{}.png'.format(imgno, j)), resized_mask)
+                for j, attr_mask_file in enumerate(attr_mask_files):
+                    # 安全地读取文件 - 如果文件不存在，则创建一个空白掩码
+                    if os.path.exists(attr_mask_file):
+                        attr_mask = cv2.imread(attr_mask_file)
+                        if attr_mask is not None:
+                            roi_mask = attr_mask[top:bottom, left:right]
+                            resized_mask = cv2.resize(roi_mask, dsize=(self.args.resize, self.args.resize), interpolation=cv2.INTER_CUBIC)
+                            cv2.imwrite(os.path.join(self.args.out, 'roi_{}_mask_{}.png'.format(imgno, j)), resized_mask)
+                        else:
+                            # 创建空白掩码
+                            empty_mask = np.zeros((self.args.resize, self.args.resize, 3), dtype=np.uint8)
+                            cv2.imwrite(os.path.join(self.args.out, 'roi_{}_mask_{}.png'.format(imgno, j)), empty_mask)
+                    else:
+                        # 创建空白掩码
+                        empty_mask = np.zeros((self.args.resize, self.args.resize, 3), dtype=np.uint8)
+                        cv2.imwrite(os.path.join(self.args.out, 'roi_{}_mask_{}.png'.format(imgno, j)), empty_mask)
 
-        return rowdata
+            return rowdata
+            
+        except Exception as e:
+            print(f"处理文件 {filename} 时出错: {str(e)}")
+            return []
 
 # Count: count pixels in mask images
 class CountTask(Task):
     def __init__(self, args):
         super().__init__(args)
+        self.mask_folder = args.mask_folder
 
     def getFileList(self):
-        return glob('./ISIC/train-resized/*mask*.png')
+        return glob(os.path.join(self.mask_folder, '*mask*.png'))
 
     def processFile(self, filename):
-        m = re.search('.*?(\d+)_mask(_(\d+))?', filename)
-        if m:
-            img = cv2.imread(filename)
-            total = np.size(img)
-            ones = np.count_nonzero(img)
-            imgno = m.groups()[0]
-            classno = m.groups()[2] if m.groups()[2] is not None else -1
-            return [imgno, classno, total, ones]
+        try:
+            m = re.search('.*?(\d+)_mask(_(\d+))?', filename)
+            if m:
+                img = cv2.imread(filename)
+                if img is None:
+                    return []
+                    
+                total = np.size(img)
+                ones = np.count_nonzero(img)
+                imgno = m.groups()[0]
+                classno = m.groups()[2] if m.groups()[2] is not None else -1
+                return [imgno, classno, total, ones]
+            return []
+        except Exception as e:
+            print(f"处理文件 {filename} 时出错: {str(e)}")
+            return []
 
 
 if __name__ == "__main__":
@@ -169,6 +212,12 @@ if __name__ == "__main__":
     parser.add_argument('-resize', action='store', nargs='?', type=int, const=224, help='resize to specified size')
     parser.add_argument('-out', action='store', default='./ISIC/train-resized', help='location to output scaled images')
     parser.add_argument('-num_procs', action='store', type=int, default=8, help='number of child processes')
+    parser.add_argument('-task1_only', action='store_true', help='只处理任务1，跳过任务2的属性掩码处理')
+    # 添加新的参数
+    parser.add_argument('-image_folder', action='store', default='./ISIC/train', help='图像文件所在文件夹')
+    parser.add_argument('-label_folder', action='store', default='./ISIC/labels', help='标签文件所在文件夹')
+    parser.add_argument('-task2_label_folder', action='store', default='./ISIC/task2-labels', help='任务2标签文件所在文件夹')
+    parser.add_argument('-mask_folder', action='store', default='./ISIC/train-resized', help='掩码文件所在文件夹')
 
     args = parser.parse_args()
 
@@ -177,4 +226,3 @@ if __name__ == "__main__":
     
     elif args.function == 'count':
         CountTask(args).start()
-

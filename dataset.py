@@ -9,6 +9,7 @@ import torch.utils.data as data
 import torchvision
 import torchvision.transforms as transforms
 from torchvision.transforms.functional import _get_inverse_affine_matrix
+import os
 
 import math
 import matplotlib.pyplot as plt
@@ -36,7 +37,7 @@ class RandomAffine(object):
     def __init__(self):
         self.angle = random.randint(-180, 180)
         self.scale = 1./(1. + random.random())
-        self.shear = 0 #random.randint(0,30)
+        self.shear = (0, 0) #random.randint(0,30)
         pass
 
     def __call__(self, item):
@@ -185,11 +186,35 @@ class LesionData(object):
         loader = data.DataLoader(eval_dataset, batch_size=batch_size, shuffle=False)
         return loader
 
+    def getExternalTestDataLoader(self, test_images_path, test_masks_path, batch_size=10):
+        # 获取测试图像文件列表
+        test_images = sorted(glob.glob(os.path.join(test_images_path, '*.jpg')))
+        test_masks = sorted(glob.glob(os.path.join(test_masks_path, '*.png')))
+        
+        if len(test_images) == 0:
+            raise ValueError(f"在 {test_images_path} 中未找到图像文件")
+        
+        if len(test_masks) == 0:
+            raise ValueError(f"在 {test_masks_path} 中未找到掩码文件")
+        
+        # 提取图像ID以便匹配
+        image_ids = [os.path.splitext(os.path.basename(img))[0] for img in test_images]
+        
+        # 创建测试数据集
+        test_dataset = LesionDataset(test_images, [[mask] for mask in test_masks], 
+                                    image_ids, LesionDataset.input_processor, augment=False)
+        
+        # 创建数据加载器
+        loader = data.DataLoader(test_dataset, batch_size=batch_size, shuffle=False)
+        print(f"已加载 {len(test_images)} 张测试图像")
+        
+        return loader
+
 if __name__ == "__main__":
 
     lesionData = LesionData()
 
-    images, labels, fnames = iter(lesionData.getTask1EvalDataLoader(10)).next()
+    images, labels, fnames = next(iter(lesionData.getTask1EvalDataLoader(10)))
     
     for i in range(10):
         print(fnames[i], lesionData.getShape(fnames[i]))
