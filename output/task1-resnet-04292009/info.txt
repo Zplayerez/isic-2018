@@ -1,0 +1,5 @@
+04-29 20:09
+optimizer: Adam
+scheduler: ReduceLROnPlateau
+learning_rate: 0.000010
+

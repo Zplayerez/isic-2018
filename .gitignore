@@ -1,6 +1,1 @@
-data/*
-.ipynb_checkpoints/*
-output*/*
-img_data.csv
-ISIC
-__pycache__/*
+*.pth
